@@ -1,0 +1,73 @@
+{
+    "firmware": "v0.9",
+    "ip": "192.168.1.109",
+    "mode": "manual",
+    "outputs": [
+        {
+            "name": "relay1",
+            "label": "\u2601\ufe0f MIST",
+            "state": true,
+            "controllable": true
+        },
+        {
+            "name": "relay2",
+            "label": "\ud83d\udca6 RAIN",
+            "state": false,
+            "controllable": true
+        },
+        {
+            "name": "relay3",
+            "label": "\ud83d\udca7 DRIP",
+            "state": false,
+            "controllable": true
+        },
+        {
+            "name": "relay4",
+            "label": "\ud83d\udca1 LIGHT",
+            "state": false,
+            "controllable": true
+        },
+        {
+            "name": "status_led",
+            "label": "Status LED",
+            "state": true,
+            "controllable": false
+        }
+    ],
+    "sensors": [
+        {
+            "name": "sensor_a",
+            "label": "Sensor-A",
+            "address": 1,
+            "ok": true,
+            "temperature_c": -9.7,
+            "humidity_pct": 61.2,
+            "errors": 0,
+            "last_error": "",
+            "raw": "01 03 00 00 00 02 C4 0B 01 03 04 FF 9F 02 66 5B 3A",
+            "age_s": 1
+        },
+        {
+            "name": "sensor_b",
+            "label": "Sensor-B",
+            "address": 2,
+            "ok": true,
+            "temperature_c": 22.1,
+            "humidity_pct": 55.0,
+            "errors": 0,
+            "last_error": "",
+            "raw": "02 03 00 00 00 02 C5 D8 02 03 04 00 DD 02 26 6A B1",
+            "age_s": 4
+        }
+    ],
+    "automation": {
+        "valve": "relay1",
+        "target_pct": 90.0,
+        "duty": 0.0,
+        "valve_on": false,
+        "period_s": 600,
+        "elapsed_s": 480,
+        "sensor_valid": true,
+        "time_synced": true
+    }
+}

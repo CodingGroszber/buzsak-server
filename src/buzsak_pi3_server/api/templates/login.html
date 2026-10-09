@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sign in | neugarden-server</title>
+    <link rel="stylesheet" href="{{ url_for('dashboard.static', filename='css/app.css') }}">
+</head>
+
+<body class="login-page">
+    <main class="login-shell">
+        <header class="login-heading">
+            <p class="login-kicker">BUZSAK / GARDEN SYSTEM</p>
+            <h1>neugarden-server</h1>
+            <p>Sign in with an issued access token.</p>
+        </header>
+        <form class="login-form" method="post" action="{{ url_for('auth.login') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label for="token">Access token</label>
+            <input id="token" name="token" type="password" autocomplete="off" required autofocus>
+            {% if login_error %}<p class="login-error" role="alert">{{ login_error }}</p>{% endif %}
+            <button type="submit">Sign in</button>
+        </form>
+    </main>
+</body>
+
+</html>

@@ -1,0 +1,26 @@
+[project]
+name = "buzsak-pi3-server"
+version = "0.1.0"
+description = "Self-hosted LAN-only garden telemetry/command server for Raspberry Pi 3"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+    "pyyaml>=6.0",
+    "gunicorn>=22.0",
+    "websockets>=13.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+buzsak-poller = "buzsak_pi3_server.poller.__main__:main"
+buzsak-dispatcher = "buzsak_pi3_server.dispatcher.__main__:main"
+buzsak-web = "buzsak_pi3_server.api.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"

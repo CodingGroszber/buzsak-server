@@ -1,0 +1,26 @@
+[
+    {
+        "node_id": 1,
+        "date_commissioned": "2026-08-08T13:16:31.089789",
+        "available": true,
+        "is_bridge": false,
+        "attributes": {
+            "0/40/1": "SONOFF",
+            "0/40/3": "SONOFF MINI-D Wi-Fi Smart Switch",
+            "0/40/15": "25517000034110",
+            "1/6/0": false
+        }
+    },
+    {
+        "node_id": 3,
+        "date_commissioned": "2026-08-08T13:37:12.568854",
+        "available": true,
+        "is_bridge": false,
+        "attributes": {
+            "0/40/1": "SONOFF",
+            "0/40/3": "SONOFF MINI-D Wi-Fi Smart Switch",
+            "0/40/15": "25517000034127",
+            "1/6/0": true
+        }
+    }
+]

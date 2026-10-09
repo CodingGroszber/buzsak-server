@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>neugarden-server</title>
+    <link rel="stylesheet" href="{{ url_for('dashboard.static', filename='css/app.css') }}">
+</head>
+
+<body>
+    <header class="app-header">
+        <div class="app-header__title-group">
+            <h1 class="app-header__title">neugarden-server</h1>
+            <span class="health-badge" id="server-health" data-status="unknown" aria-live="polite">
+                <span class="health-badge__dot" aria-hidden="true"></span>
+                <span>server: checking&hellip;</span>
+            </span>
+        </div>
+        <ul class="app-header__health" id="header-health" aria-label="Connected service health"></ul>
+        <form class="app-header__logout" method="post" action="{{ url_for('auth.logout') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit">Sign out</button>
+        </form>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="Device groups" id="tabs"></nav>
+
+    <main id="tab-panels"></main>
+
+    <p class="status-line" id="status-line" role="status"></p>
+
+    <script src="{{ url_for('dashboard.static', filename='js/app.js') }}"></script>
+</body>
+
+</html>

@@ -1,0 +1,25 @@
+[Unit]
+Description=Buzsak Pi 3 Server - web/API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=neulas
+Group=neulas
+WorkingDirectory=/home/neulas/buzsak-pi3-server
+Environment=PYTHONPATH=src
+Environment=BUZSAK_CONFIG=config/production.yaml
+Environment=HOME=/tmp
+EnvironmentFile=-/etc/buzsak-pi3-server/web.env
+ExecStart=/home/neulas/buzsak-pi3-server/.venv/bin/gunicorn --bind 127.0.0.1:8080 --workers 1 buzsak_pi3_server.api.wsgi:app
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/neulas/buzsak-pi3-server/data
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

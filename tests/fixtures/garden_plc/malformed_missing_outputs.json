@@ -1,0 +1,11 @@
+{
+    "firmware": "v4.0",
+    "ip": "192.168.1.94",
+    "inputs": [
+        {
+            "name": "right_sw",
+            "label": "Switch Right",
+            "state": false
+        }
+    ]
+}

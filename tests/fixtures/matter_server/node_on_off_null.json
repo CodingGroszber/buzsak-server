@@ -1,0 +1,11 @@
+{
+    "node_id": 5,
+    "available": true,
+    "is_bridge": false,
+    "attributes": {
+        "0/40/1": "SONOFF",
+        "0/40/3": "SONOFF MINI-D Wi-Fi Smart Switch",
+        "0/40/15": "25517000099999",
+        "1/6/0": null
+    }
+}

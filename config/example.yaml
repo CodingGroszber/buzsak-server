@@ -1,0 +1,50 @@
+# Non-secret example configuration (OPS-01, OPS-02).
+# Secrets (tokens, credentials) are provisioned separately, never here.
+
+database:
+  path: "/var/lib/buzsak-pi3-server/buzsak.sqlite3"
+  busy_timeout_ms: 5000
+  synchronous: "FULL" # DB-01 initial durability baseline; revisit after measuring the Pi.
+
+server:
+  bind_host: "127.0.0.1" # fronted by a reverse proxy/TLS terminator; not exposed directly.
+  bind_port: 8000
+
+polling:
+  default_interval_seconds: 1.0 # POL-01 proposed default for active telemetry endpoints.
+  stale_multiplier: 3.0 # POL-11 proposed staleness default.
+
+control:
+  valve_enabled: false # Opt-in per deployment after trusted HTTPS/auth are set up.
+  command_lifetime_seconds: 12
+  confirmation_timeout_seconds: 5.0
+  max_attempts: 1
+  per_device_queue_depth: 3
+
+# Each entry is a future device adapter target. Unsupported/unverified
+# capabilities must stay disabled (DEV-01, DEV-04).
+devices:
+  - id: "garden-plc"
+    kind: "garden-plc"
+    address: "http://192.168.1.94/"
+    enabled: false
+  - id: "valve-controller"
+    kind: "valve-controller"
+    address: "http://192.168.1.109/"
+    enabled: false
+  # DEV-09: read-only telemetry via an already-commissioned Matter-server
+  # instance (docs/adapters/matter_server.md). The node id travels as a URL
+  # fragment on the shared WS endpoint since both switches share one
+  # Matter-server connection. Disabled by default in this shipped example;
+  # a specific deployment enables these once it verifies its own
+  # Matter-server address and node ids.
+  - id: "sonoff-1"
+    kind: "sonoff-minid"
+    address: "ws://192.168.1.95:5580/ws#node_id=1"
+    enabled: false
+    label: "GARAGE-RIGHT" # DEV-10: physical garage door opener relay
+  - id: "sonoff-2"
+    kind: "sonoff-minid"
+    address: "ws://192.168.1.95:5580/ws#node_id=3"
+    enabled: false
+    label: "GARAGE-LEFT" # DEV-10: physical garage door opener relay

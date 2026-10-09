@@ -1,0 +1,59 @@
+{
+    "firmware": "v4.0",
+    "ip": "192.168.1.94",
+    "inputs": [
+        {
+            "name": "right_sw",
+            "label": "Switch Right",
+            "state": false
+        },
+        {
+            "name": "left_sw",
+            "label": "Switch Left",
+            "state": false
+        }
+    ],
+    "outputs": [
+        {
+            "name": "well_pump",
+            "label": "Well Pump",
+            "state": false,
+            "controllable": true
+        },
+        {
+            "name": "tank_pump",
+            "label": "Tank Pump",
+            "state": false,
+            "controllable": true
+        },
+        {
+            "name": "switch_led",
+            "label": "Switch LED",
+            "state": false,
+            "controllable": false
+        },
+        {
+            "name": "wifi_led",
+            "label": "WiFi LED",
+            "state": true,
+            "controllable": false
+        }
+    ],
+    "analog": [
+        {
+            "name": "pressure",
+            "label": "Pressure Sensor",
+            "mv": 1083,
+            "signal": true,
+            "bar": 3.0
+        },
+        {
+            "name": "water_level",
+            "label": "Water Level Sensor",
+            "mv": 0,
+            "signal": false,
+            "liters": 0,
+            "low": true
+        }
+    ]
+}
