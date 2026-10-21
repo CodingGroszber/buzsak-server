@@ -336,6 +336,52 @@ def test_valve_capability_metadata_is_enabled_only_by_deployment_gate(connection
     assert capability["requires"]["fresh"] is True
 
 
+def test_plc_refill_capability_is_disabled_by_default(connection):
+    connection.execute(
+        "INSERT INTO devices (id, kind, address, enabled, created_at, updated_at) "
+        "VALUES ('garden-plc', 'garden_plc', 'http://192.168.1.94/', 1, "
+        "datetime('now'), datetime('now'))"
+    )
+    connection.execute(
+        "INSERT INTO capabilities (device_id, action_id, params_schema) "
+        "VALUES ('garden-plc', 'refill', '{}')"
+    )
+
+    state = build_dashboard_state(connection, _app_config())
+    capability = state["parties"][0]["devices"][0]["capabilities"][0]
+
+    assert capability["action_id"] == "refill"
+    assert capability["enabled"] is False
+    assert "disabled" in capability["disabled_reason"]
+
+
+def test_plc_refill_metadata_requires_auto_and_valid_water_sensor(connection):
+    connection.execute(
+        "INSERT INTO devices (id, kind, address, enabled, created_at, updated_at) "
+        "VALUES ('garden-plc', 'garden_plc', 'http://192.168.1.94/', 1, "
+        "datetime('now'), datetime('now'))"
+    )
+    connection.execute(
+        "INSERT INTO capabilities (device_id, action_id, params_schema) "
+        "VALUES ('garden-plc', 'refill', '{}')"
+    )
+    app_config = _app_config(
+        devices=(DeviceConfig(
+            id="garden-plc", kind="garden-plc",
+            address="http://192.168.1.94/", enabled=True),),
+        control=ControlConfig(plc_refill_enabled=True),
+    )
+
+    state = build_dashboard_state(connection, app_config)
+    capability = state["parties"][0]["devices"][0]["capabilities"][0]
+
+    assert capability["enabled"] is True
+    assert capability["retry_safe"] is False
+    assert capability["requires"]["switch_mode"] == "automatic"
+    assert capability["requires"]["water_level_signal"] is True
+    assert capability["effect"] == "refill_until_level_threshold"
+
+
 def test_last_pulse_is_none_without_any_pulse_requests(connection):
     connection.execute(
         "INSERT INTO devices (id, kind, address, enabled, created_at, updated_at) "

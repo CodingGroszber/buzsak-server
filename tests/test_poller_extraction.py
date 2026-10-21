@@ -36,7 +36,13 @@ def test_garden_plc_extracts_all_catalog_parameters():
     by_id = _by_parameter_id(observations)
     assert set(by_id) == {
         "well_pump", "tank_pump", "right_sw", "left_sw",
-        "switch_led", "wifi_led", "pressure_bar", "water_level_liters",
+        "switch_led", "wifi_led", "well_pump_controllable",
+        "tank_pump_controllable", "switch_led_controllable",
+        "wifi_led_controllable", "firmware", "ip", "switch_mode",
+        "switch_mode_code", "refill_button", "refill_active",
+        "pressure_bar", "pressure_signal", "pressure_mv",
+        "water_level_liters", "water_level_signal", "water_level_mv",
+        "water_level_low",
     }
     assert by_id["well_pump"].value == "true"
     assert by_id["well_pump"].value_type == "bool"
@@ -55,7 +61,23 @@ def test_garden_plc_accepts_the_canonical_underscored_kind_too():
 
     observations = extract_observations("garden_plc", payload)
 
-    assert len(observations) == 8
+    assert len(observations) == 23
+
+
+def test_garden_plc_v41_refill_payload_exposes_client_state():
+    payload = _load(GARDEN_PLC_FIXTURES, "state_v41_refill.json")
+
+    by_id = _by_parameter_id(extract_observations("garden-plc", payload))
+
+    assert by_id["firmware"].value == "v4.1"
+    assert by_id["switch_mode"].value == "automatic"
+    assert by_id["switch_mode_code"].value == "1"
+    assert by_id["refill_button"].value == "false"
+    assert by_id["refill_active"].value == "false"
+    assert by_id["well_pump_controllable"].value == "false"
+    assert by_id["water_level_signal"].value == "true"
+    assert by_id["water_level_mv"].value == "2398"
+    assert by_id["water_level_low"].value == "false"
 
 
 def test_garden_plc_pressure_invalid_signal_is_reported_as_invalid_null():

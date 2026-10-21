@@ -44,6 +44,19 @@ def _sync_device(connection: sqlite3.Connection, device: DeviceConfig) -> None:
         (device.id, kind, device.address, int(device.enabled)),
     )
     entry = catalog.CATALOG[kind]
+    capability_ids = tuple(
+        capability.action_id for capability in entry.capabilities)
+    if capability_ids:
+        placeholders = ", ".join("?" for _ in capability_ids)
+        connection.execute(
+            f"DELETE FROM capabilities WHERE device_id = ? "
+            f"AND action_id NOT IN ({placeholders})",
+            (device.id, *capability_ids),
+        )
+    else:
+        connection.execute(
+            "DELETE FROM capabilities WHERE device_id = ?", (device.id,))
+
     for parameter in entry.parameters:
         connection.execute(
             "INSERT INTO parameters (device_id, parameter_id, category, unit) "

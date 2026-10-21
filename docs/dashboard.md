@@ -54,10 +54,10 @@ revocable Secure/HttpOnly/SameSite session; native clients use bearer tokens.
           ],
           "capabilities": [
             {
-              "action_id": "set_output",
-              "params_schema": { "name": "well_pump", "state": "bool" },
-              "enabled": false,                  // valve control defaults off in deployment config
-              "disabled_reason": "Valve control is disabled by deployment configuration; trusted HTTPS and operator authentication are required."
+              "action_id": "refill",
+              "params_schema": {},
+              "enabled": false,                  // PLC refill defaults off in deployment config
+              "disabled_reason": "PLC refill is disabled by deployment configuration; a fresh AUTO-mode and valid water-level signal are required."
             }
           ]
         }
@@ -98,20 +98,33 @@ threshold, the response sets `health.stale: true` and downgrades a stored
 per-device worker thread has stopped; it does not mutate the stored
 `device_health` row. Disabled devices are not downgraded by age.
 
-## Valve commands
+## Device commands
 
 The browser dashboard remains read-only (UI-06). An authenticated native
 client may submit `POST /api/v1/devices/{device_id}/commands` over trusted
-HTTPS with an operator bearer token. The durable API accepts only
-`set_output` and `set_mode` for the valve controller, validates fresh health
-and relevant observations, enforces idempotency and a bounded deadline, and
-returns `202` with a command ID/status URL. Use `GET /api/v1/commands/{id}`
-for status and `DELETE` only while pending. Admins may queue an uncertain
-outcome for dispatcher-owned reconciliation at
-`POST /api/v1/commands/{id}/reconcile`.
+HTTPS with an operator bearer token. The API supports valve-controller
+`set_output`/`set_mode`, gated PLC `refill`, and the existing scoped Sonoff
+`pulse` endpoint. Durable commands validate fresh health and relevant
+observations, enforce idempotency and bounded deadlines, and return `202`
+with a command ID/status URL. Use `GET /api/v1/commands/{id}` for status and
+`DELETE` only while pending. Admins may queue an uncertain outcome for
+dispatcher-owned reconciliation at `POST /api/v1/commands/{id}/reconcile`.
 
 Valve actions are enabled in capability metadata only when the protected
 deployment config sets `control.valve_enabled: true`; the default is false.
 The dispatcher makes at most one device request. Acknowledgment is not
 confirmation: only fresh post-attempt poller telemetry can confirm. Output
 confirmation means relay state, not physical valve motion or water flow.
+
+### PLC `refill`
+
+For a v4.1 PLC, submit `action_id: "refill"` with `params: {}`. This is a
+momentary request pulse to the PLC's refill state machine, **not** a direct
+well-pump output command. The PLC may run the well pump until its 1000 L
+threshold, selector change, or missing water-level signal. Acceptance
+requires fresh AUTO selector state, idle refill flags, and a valid water
+level below threshold. Acknowledgment alone does not confirm the request;
+fresh post-attempt telemetry must show `refill_button` or `refill_active`.
+The action is never automatically retried, and its separate gate
+`control.plc_refill_enabled` defaults to false. The browser dashboard does
+not expose this control.

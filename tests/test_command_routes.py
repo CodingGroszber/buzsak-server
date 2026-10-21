@@ -181,3 +181,97 @@ def test_only_admin_can_queue_uncertain_command_reconciliation(tmp_path):
         connection.close()
     assert command_state == "uncertain"
     assert request_status == "pending"
+
+
+def test_operator_can_enqueue_plc_refill_when_deployment_gate_is_enabled(tmp_path):
+    config = AppConfig(
+        database=DatabaseConfig(path=str(tmp_path / "plc-refill.sqlite3")),
+        server=ServerConfig(),
+        polling=PollingConfig(),
+        devices=(DeviceConfig(
+            id="garden-plc", kind="garden-plc",
+            address="http://127.0.0.1:1/", enabled=True),),
+        control=ControlConfig(plc_refill_enabled=True),
+    )
+    connection = db.connect(config.database)
+    schema.apply_migrations(connection)
+    sync_devices(connection, config)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    connection.execute(
+        "INSERT INTO device_health "
+        "(device_id,status,last_success_at,last_error,consecutive_failures,updated_at) "
+        "VALUES ('garden-plc','healthy',?,NULL,0,?)", (now, now))
+    values = {
+        "switch_mode_code": ("1", "int"),
+        "refill_button": ("false", "bool"),
+        "refill_active": ("false", "bool"),
+        "water_level_signal": ("true", "bool"),
+        "water_level_liters": ("750.0", "float"),
+    }
+    for parameter_id, (value, value_type) in values.items():
+        connection.execute(
+            "INSERT INTO observations_latest "
+            "(device_id,parameter_id,value,value_type,quality,observed_at,last_changed_at,revision) "
+            "VALUES ('garden-plc',?,?,?,'good',?,?,1)",
+            (parameter_id, value, value_type, now, now))
+    _, token = issue_credential(connection, "garden-operator", "operator")
+    connection.close()
+    client = create_app(config).test_client()
+
+    response = client.post(
+        "/api/v1/devices/garden-plc/commands",
+        json={
+            "action_id": "refill",
+            "params": {},
+            "idempotency_key": "plc-refill-001",
+            "client_origin": "android-app",
+        },
+        headers=_headers(token),
+        base_url="https://localhost",
+    )
+
+    assert response.status_code == 202
+    assert response.get_json()["status"] == "pending"
+    connection = db.connect(config.database)
+    try:
+        command = connection.execute(
+            "SELECT state,action_id,device_id FROM commands WHERE command_id=?",
+            (response.get_json()["command_id"],),
+        ).fetchone()
+    finally:
+        connection.close()
+    assert command == ("pending", "refill", "garden-plc")
+
+
+def test_plc_refill_api_is_disabled_when_its_gate_is_off(tmp_path):
+    config = AppConfig(
+        database=DatabaseConfig(
+            path=str(tmp_path / "plc-refill-disabled.sqlite3")),
+        server=ServerConfig(),
+        polling=PollingConfig(),
+        devices=(DeviceConfig(
+            id="garden-plc", kind="garden-plc",
+            address="http://127.0.0.1:1/", enabled=True),),
+        control=ControlConfig(plc_refill_enabled=False),
+    )
+    connection = db.connect(config.database)
+    schema.apply_migrations(connection)
+    sync_devices(connection, config)
+    _, token = issue_credential(connection, "garden-operator", "operator")
+    connection.close()
+    client = create_app(config).test_client()
+
+    response = client.post(
+        "/api/v1/devices/garden-plc/commands",
+        json={
+            "action_id": "refill",
+            "params": {},
+            "idempotency_key": "plc-refill-disabled",
+            "client_origin": "android-app",
+        },
+        headers=_headers(token),
+        base_url="https://localhost",
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "control_disabled"

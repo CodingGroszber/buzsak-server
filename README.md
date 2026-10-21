@@ -18,13 +18,14 @@ Three independently supervised processes share one local SQLite database
 - **Web/API** (`buzsak-web` for development, `buzsak_pi3_server.api.wsgi:app`
   for production) — serves the dashboard/API; never contacts devices directly.
 
-The poller and adapters support the registered PLC, valve controller, and
-commissioned Sonoff telemetry devices. The durable command lifecycle
-supports the valve controller's `set_output`/`set_mode` actions and the
-narrow Sonoff pulse exception. Valve control requires trusted HTTPS and an
-operator credential and is enabled by protected deployment configuration.
-The browser dashboard remains read-only. See [backlog.md](backlog.md) for
-remaining operational gates.
+The poller/adapters support the registered PLC, valve controller, and
+commissioned Sonoff telemetry devices. For PLC firmware v4.1, the server
+reads `switch_mode`, refill state, output controllability, and analog signal
+quality; the removed v4.0 selector input fields remain unavailable rather
+than blocking all telemetry. The durable command lifecycle supports valve
+`set_output`/`set_mode`, a separately gated PLC `refill` request, and the
+narrow Sonoff pulse exception. The browser dashboard remains read-only.
+See [backlog.md](backlog.md) for remaining operational gates.
 
 ## Setup
 
@@ -134,8 +135,14 @@ the LAN address alone does not grant access. For the current Pi deployment:
   `admin` may request reconciliation of an uncertain result. Browser users
   enter the token at `/login`; the server exchanges it for a Secure,
   HttpOnly session. Native clients use `Authorization: Bearer <token>`.
-- The Android/API command route accepts only `set_output` and `set_mode`
-  for the valve controller. The browser dashboard remains read-only.
+- The Android/API command route accepts `set_output` and `set_mode` for the
+  valve controller, and `refill` for a PLC running the verified v4.1
+  contract when its separate `control.plc_refill_enabled` gate is enabled.
+  Refill is a one-shot firmware state-machine request, not direct pump
+  control; it may run the well pump until the PLC reaches its high-level
+  stop threshold. It is never automatically retried. The gate defaults off
+  and requires separate live-actuation approval. The browser dashboard
+  remains read-only.
   `confirmed` reports observed relay/mode state, not water flow or physical
   valve movement. A mode change closes all relays.
 - For remote use, install the official Tailscale app and join the owner's

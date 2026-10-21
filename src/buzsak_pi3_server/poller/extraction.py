@@ -35,28 +35,78 @@ def extract_garden_plc(payload: Any) -> list[ParsedObservation]:
         tank_pump = state.output("tank_pump")
         switch_led = state.output("switch_led")
         wifi_led = state.output("wifi_led")
-        right_sw = next(i for i in state.inputs if i.name == "right_sw")
-        left_sw = next(i for i in state.inputs if i.name == "left_sw")
         pressure = state.analog_channel("pressure")
         water_level = state.analog_channel("water_level")
     except (KeyError, StopIteration) as exc:
         raise AdapterParseError(
             f"state: expected channel missing from payload: {exc}") from exc
 
+    input_by_name = {item.name: item for item in state.inputs}
     observations = [
         ParsedObservation("well_pump", _bool_str(
             well_pump.state), "bool", "good"),
+        ParsedObservation("well_pump_controllable", _bool_str(
+            well_pump.controllable), "bool", "good"),
         ParsedObservation("tank_pump", _bool_str(
             tank_pump.state), "bool", "good"),
-        ParsedObservation("right_sw", _bool_str(
-            right_sw.state), "bool", "good"),
-        ParsedObservation("left_sw", _bool_str(
-            left_sw.state), "bool", "good"),
+        ParsedObservation("tank_pump_controllable", _bool_str(
+            tank_pump.controllable), "bool", "good"),
         ParsedObservation("switch_led", _bool_str(
             switch_led.state), "bool", "good"),
+        ParsedObservation("switch_led_controllable", _bool_str(
+            switch_led.controllable), "bool", "good"),
         ParsedObservation("wifi_led", _bool_str(
             wifi_led.state), "bool", "good"),
+        ParsedObservation("wifi_led_controllable", _bool_str(
+            wifi_led.controllable), "bool", "good"),
+        ParsedObservation("firmware", state.firmware, "string", "good"),
+        ParsedObservation("ip", state.ip, "string", "good"),
     ]
+    for input_name in ("right_sw", "left_sw"):
+        item = input_by_name.get(input_name)
+        observations.append(
+            ParsedObservation(
+                input_name,
+                _bool_str(item.state) if item is not None else None,
+                "bool" if item is not None else "null",
+                "good" if item is not None else "unavailable",
+            )
+        )
+
+    mode_labels = {-1: "invalid", 0: "off", 1: "automatic", 2: "manual"}
+    if state.switch_mode is None:
+        observations.extend((
+            ParsedObservation("switch_mode", None, "null", "unavailable"),
+            ParsedObservation("switch_mode_code", None, "null", "unavailable"),
+        ))
+    else:
+        observations.extend((
+            ParsedObservation(
+                "switch_mode", mode_labels[state.switch_mode], "string", "good"),
+            ParsedObservation("switch_mode_code", str(
+                state.switch_mode), "int", "good"),
+        ))
+    for parameter_id, value in (
+        ("refill_button", state.refill_button),
+        ("refill_active", state.refill_active),
+    ):
+        observations.append(
+            ParsedObservation(
+                parameter_id,
+                _bool_str(value) if value is not None else None,
+                "bool" if value is not None else "null",
+                "good" if value is not None else "unavailable",
+            )
+        )
+    observations.extend((
+        ParsedObservation("pressure_signal", _bool_str(
+            pressure.signal), "bool", "good"),
+        ParsedObservation("pressure_mv", str(pressure.mv), "int", "good"),
+        ParsedObservation("water_level_signal", _bool_str(
+            water_level.signal), "bool", "good"),
+        ParsedObservation("water_level_mv", str(
+            water_level.mv), "int", "good"),
+    ))
     if pressure.signal and pressure.bar is not None:
         observations.append(ParsedObservation(
             "pressure_bar", str(pressure.bar), "float", "good"))
@@ -66,9 +116,13 @@ def extract_garden_plc(payload: Any) -> list[ParsedObservation]:
     if water_level.water_level_valid:
         observations.append(ParsedObservation(
             "water_level_liters", str(water_level.liters), "float", "good"))
+        observations.append(ParsedObservation(
+            "water_level_low", _bool_str(bool(water_level.low)), "bool", "good"))
     else:
         observations.append(ParsedObservation(
             "water_level_liters", None, "null", "invalid"))
+        observations.append(ParsedObservation(
+            "water_level_low", None, "null", "invalid"))
     return observations
 
 

@@ -160,6 +160,28 @@ requirement IDs where one exists.
   is true in the protected production config. Remaining gates: verify the
   approved LAN subnet/firewall and import Caddy's CA plus provision unique
   credentials for each additional client.
+- **PLC firmware v4.1 and refill API (deployed, 2026-10-21)**: parser now
+  accepts the live `switch_mode`/refill payload,
+  tolerates the removed v4.0 `inputs[]`, exposes current firmware/output
+  controllability/refill/analog diagnostics, and keeps old input IDs
+  unavailable instead of taking the whole device offline. A separate
+  `refill` command is modeled as a single non-idempotent 500 ms request pulse,
+  with fresh AUTO/idle/water-signal/under-1000-L checks, 12s expiry, one send,
+  and fresh refill-button/active confirmation. Firmware owns the actual pump
+  run/stop; no direct pump `set_output` is advertised. Catalog sync removed
+  the obsolete v4.0 `set_output` capability. `control.plc_refill_enabled`
+  remains false, and no PLC refill has been actuated. Simulator parser,
+  acceptance, dispatcher, API, and capability tests cover this path. Physical
+  refill testing requires separate explicit approval due to pump operation
+  and the documented water-level sensor calibration issue.
+- **Large-database deployment contention (2026-10-21)**: the pre-migration
+  online backup of the 1.76 GB production DB took over ten minutes and
+  coincided with `database is locked` errors and dispatcher restarts; free
+  space fell below 1 GB. The backup completed at full source size. The deploy
+  helper now skips full backups when the schema is already current and backs
+  up only before a pending migration. After the deploy, lock errors were
+  still observed briefly with a large WAL; monitor disk/WAL and writer
+  contention before enabling PLC refill. No old backups were deleted.
 - **Thread-liveness watchdog (added 2026-10-05, OPS-04)**: a real incident
   on the Pi showed all 4 per-device poller worker threads had silently
   died (one on 2026-10-03, three more on 2026-10-04) while the

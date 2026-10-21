@@ -16,6 +16,8 @@ from buzsak_pi3_server.config import AppConfig
 from buzsak_pi3_server.security.credentials import Principal
 
 _VALVE_KIND = "valve_controller"
+_PLC_KIND = "garden_plc"
+_PLC_REFILL_STOP_LITERS = 1000.0
 _ACTIVE_STATES = ("dispatching", "sent", "acknowledged", "uncertain")
 _OUTPUT_PARAMETERS = {
     "relay1": ("relay1_mist", "relay1_controllable", "relay1_always_manual"),
@@ -73,6 +75,14 @@ def _action_parameters(action_id: str, params: Any) -> tuple[str, ...]:
     if not isinstance(params, dict):
         raise CommandRejected(
             "invalid_request", "params must be an object", 400)
+    if action_id == "refill":
+        if params:
+            raise CommandRejected(
+                "invalid_request", "refill takes no parameters", 400)
+        return (
+            "switch_mode_code", "refill_button", "refill_active",
+            "water_level_signal", "water_level_liters",
+        )
     if action_id == "set_output":
         if set(params) != {"name", "state"}:
             raise CommandRejected(
@@ -170,7 +180,11 @@ def _validate_fresh_state(
             raise CommandRejected(
                 "stale_revision", f"{parameter_id} revision changed", 409)
 
-    mode = observed["mode"][0]
+    mode_parameter = (
+        "mode" if canonical_kind(device_config.kind) == _VALVE_KIND
+        else "switch_mode_code"
+    )
+    mode = observed[mode_parameter][0]
     if action_id == "set_output":
         name = params["name"]
         _, controllable_id, always_manual_id = _OUTPUT_PARAMETERS[name]
@@ -181,6 +195,19 @@ def _validate_fresh_state(
         if mode != "manual" and not always_manual:
             raise CommandRejected("precondition_failed",
                                   "output requires manual mode", 409)
+    elif action_id == "refill":
+        if mode != "1":
+            raise CommandRejected(
+                "precondition_failed", "PLC selector must be in automatic mode", 409)
+        if observed["refill_active"][0] == "true" or observed["refill_button"][0] == "true":
+            raise CommandRejected(
+                "conflict", "a refill request is already pending or active", 409)
+        if observed["water_level_signal"][0] != "true":
+            raise CommandRejected(
+                "precondition_failed", "water-level signal is invalid", 409)
+        if float(observed["water_level_liters"][0]) >= _PLC_REFILL_STOP_LITERS:
+            raise CommandRejected(
+                "precondition_failed", "water level is already at the refill stop threshold", 409)
     return {
         "observed_revisions": {key: value[1] for key, value in observed.items()},
         "observed_mode": mode,
@@ -202,18 +229,26 @@ def submit_command(
 ) -> AcceptedCommand:
     if principal.role not in {"operator", "admin"}:
         raise CommandRejected("forbidden", "operator role is required", 403)
-    if not app_config.control.valve_enabled:
+    if action_id in {"set_output", "set_mode"}:
+        expected_kind = _VALVE_KIND
+        enabled = app_config.control.valve_enabled
+    elif action_id == "refill":
+        expected_kind = _PLC_KIND
+        enabled = app_config.control.plc_refill_enabled
+    else:
+        raise CommandRejected("invalid_request", "unsupported action", 400)
+    if not enabled:
         raise CommandRejected(
-            "control_disabled", "valve control is disabled by deployment configuration", 403)
+            "control_disabled", f"{action_id} is disabled by deployment configuration", 403)
     device_config = next(
         (d for d in app_config.devices if d.id == device_id), None)
     if (
         device_config is None
         or not device_config.enabled
-        or canonical_kind(device_config.kind) != _VALVE_KIND
+        or canonical_kind(device_config.kind) != expected_kind
     ):
         raise CommandRejected(
-            "not_found", "unknown or disabled valve device", 404)
+            "not_found", "unknown or disabled command target", 404)
     if not isinstance(idempotency_key, str) or not 1 <= len(idempotency_key) <= 128:
         raise CommandRejected(
             "invalid_request", "idempotency_key must contain 1 to 128 characters", 400)
@@ -249,9 +284,9 @@ def submit_command(
         device_row = connection.execute(
             "SELECT enabled, kind FROM devices WHERE id = ?", (device_id,)
         ).fetchone()
-        if device_row is None or not device_row[0] or device_row[1] != _VALVE_KIND:
+        if device_row is None or not device_row[0] or device_row[1] != expected_kind:
             raise CommandRejected(
-                "not_found", "unknown or disabled valve device", 404)
+                "not_found", "unknown or disabled command target", 404)
         capability = connection.execute(
             "SELECT 1 FROM capabilities WHERE device_id = ? AND action_id = ?",
             (device_id, action_id),

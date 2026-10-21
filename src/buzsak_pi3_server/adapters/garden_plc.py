@@ -63,6 +63,9 @@ class PlcState:
     inputs: tuple[DigitalInput, ...]
     outputs: tuple[DigitalOutput, ...]
     analog: tuple[AnalogChannel, ...]
+    switch_mode: int | None
+    refill_button: bool | None
+    refill_active: bool | None
 
     def output(self, name: str) -> DigitalOutput:
         for output in self.outputs:
@@ -166,13 +169,39 @@ def parse_state(payload: Any) -> PlcState:
 
     firmware = _get_str(payload, "firmware", "state")
     ip = _get_str(payload, "ip", "state")
-    inputs = tuple(
-        _parse_input(item, i) for i, item in enumerate(_get_list(payload, "inputs", "state"))
-    )
+    raw_inputs = payload.get("inputs", [])
+    if not isinstance(raw_inputs, list):
+        raise AdapterParseError("state: field 'inputs' must be a list")
+    inputs = tuple(_parse_input(item, i) for i, item in enumerate(raw_inputs))
     outputs = tuple(
         _parse_output(item, i) for i, item in enumerate(_get_list(payload, "outputs", "state"))
     )
     analog = tuple(
         _parse_analog(item, i) for i, item in enumerate(_get_list(payload, "analog", "state"))
     )
-    return PlcState(firmware=firmware, ip=ip, inputs=inputs, outputs=outputs, analog=analog)
+    switch_mode = None
+    if "switch_mode" in payload:
+        raw_switch_mode = _get_number(payload, "switch_mode", "state")
+        if raw_switch_mode not in {-1, 0, 1, 2}:
+            raise AdapterParseError(
+                "state: field 'switch_mode' must be one of -1, 0, 1, 2")
+        switch_mode = int(raw_switch_mode)
+
+    refill_button = (
+        _get_bool(payload, "refill_button", "state")
+        if "refill_button" in payload else None
+    )
+    refill_active = (
+        _get_bool(payload, "refill_active", "state")
+        if "refill_active" in payload else None
+    )
+    return PlcState(
+        firmware=firmware,
+        ip=ip,
+        inputs=inputs,
+        outputs=outputs,
+        analog=analog,
+        switch_mode=switch_mode,
+        refill_button=refill_button,
+        refill_active=refill_active,
+    )

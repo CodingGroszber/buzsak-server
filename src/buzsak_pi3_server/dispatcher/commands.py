@@ -16,6 +16,7 @@ from buzsak_pi3_server import db
 from buzsak_pi3_server.commands.service import (
     CommandRejected,
     _OUTPUT_PARAMETERS,
+    _PLC_KIND,
     _action_parameters,
     _validate_fresh_state,
 )
@@ -86,7 +87,7 @@ def claim_one_pending(
                    now_text, {"reason": "deadline_expired"})
             processed_expired = True
 
-        if not app_config.control.valve_enabled:
+        if not app_config.control.valve_enabled and not app_config.control.plc_refill_enabled:
             connection.execute("COMMIT")
             return processed_expired, None
 
@@ -97,7 +98,10 @@ def claim_one_pending(
             "WHERE c.state = 'pending' AND NOT EXISTS ("
             "SELECT 1 FROM commands active WHERE active.device_id = c.device_id "
             "AND active.state IN ('dispatching', 'sent', 'acknowledged', 'uncertain')) "
-            "ORDER BY c.acceptance_sequence LIMIT 1"
+            "AND ((d.kind = 'valve_controller' AND ? = 1) OR "
+            "(d.kind = 'garden_plc' AND c.action_id = 'refill' AND ? = 1)) "
+            "ORDER BY c.acceptance_sequence LIMIT 1", (int(app_config.control.valve_enabled),
+                                                       int(app_config.control.plc_refill_enabled))
         ).fetchone()
         if row is None:
             connection.execute("COMMIT")
@@ -176,6 +180,8 @@ def _parse_iso(value: str) -> datetime:
 
 
 def _device_url(address: str, action_id: str, params: dict) -> str:
+    if action_id == "refill":
+        return urllib.parse.urljoin(address, "api/control")
     if action_id == "set_output":
         query = urllib.parse.urlencode({
             "name": params["name"],
@@ -187,10 +193,17 @@ def _device_url(address: str, action_id: str, params: dict) -> str:
 
 
 def _send(claim: ClaimedCommand, timeout_seconds: float) -> tuple[int | None, str | None]:
+    if claim.action_id == "refill":
+        request_data = urllib.parse.urlencode(
+            {"name": "refill", "state": "1"}).encode("ascii")
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    else:
+        request_data = b""
+        headers = {"Content-Length": "0"}
     request = urllib.request.Request(
         _device_url(claim.address, claim.action_id, claim.params),
-        data=b"",
-        headers={"Content-Length": "0"},
+        data=request_data,
+        headers=headers,
         method="POST",
     )
     opener = urllib.request.build_opener(_NoRedirect())
@@ -398,7 +411,9 @@ def reconcile_acknowledged(
         interval = device_config.poll_interval_seconds or app_config.polling.default_interval_seconds
         stale_after = interval * app_config.polling.stale_multiplier
         params = json.loads(params_json)
-        if action_id == "set_mode":
+        if action_id == "refill":
+            parameter_ids = ("refill_button", "refill_active")
+        elif action_id == "set_mode":
             parameter_ids = ("mode", "relay1_mist",
                              "relay2_rain", "relay3_drip", "relay4_light")
         else:
@@ -410,7 +425,12 @@ def reconcile_acknowledged(
         confirmed = False
         if snapshot is not None:
             values = snapshot["values"]
-            if action_id == "set_mode":
+            if action_id == "refill":
+                confirmed = (
+                    values["refill_button"] == "true"
+                    or values["refill_active"] == "true"
+                )
+            elif action_id == "set_mode":
                 confirmed = (
                     values["mode"] == params["value"]
                     and all(values[key] == "false" for key in parameter_ids[1:])
@@ -478,7 +498,9 @@ def reconcile_uncertain(
         interval = device_config.poll_interval_seconds or app_config.polling.default_interval_seconds
         stale_after = interval * app_config.polling.stale_multiplier
         params = json.loads(params_json)
-        if action_id == "set_mode":
+        if action_id == "refill":
+            parameter_ids = ("refill_button", "refill_active")
+        elif action_id == "set_mode":
             parameter_ids = ("mode", "relay1_mist",
                              "relay2_rain", "relay3_drip", "relay4_light")
         else:
@@ -490,7 +512,12 @@ def reconcile_uncertain(
         if snapshot is None:
             continue
         values = snapshot["values"]
-        if action_id == "set_mode":
+        if action_id == "refill":
+            confirmed = (
+                values["refill_button"] == "true"
+                or values["refill_active"] == "true"
+            )
+        elif action_id == "set_mode":
             confirmed = (
                 values["mode"] == params["value"]
                 and all(values[key] == "false" for key in parameter_ids[1:])
@@ -557,7 +584,9 @@ def process_reconciliation_requests(
             result_reason = "command is no longer uncertain"
         elif resolution == "confirmed":
             params = json.loads(params_json)
-            if action_id == "set_mode":
+            if action_id == "refill":
+                parameter_ids = ("refill_button", "refill_active")
+            elif action_id == "set_mode":
                 parameter_ids = (
                     "mode", "relay1_mist", "relay2_rain", "relay3_drip", "relay4_light")
             else:
@@ -576,6 +605,14 @@ def process_reconciliation_requests(
             )
             if snapshot is None:
                 result_reason = "fresh post-attempt telemetry is unavailable"
+            elif action_id == "refill":
+                values = snapshot["values"]
+                matches = (
+                    values["refill_button"] == "true"
+                    or values["refill_active"] == "true"
+                )
+                if not matches:
+                    result_reason = "fresh telemetry does not show the refill request pulse or active fill"
             elif action_id == "set_mode":
                 values = snapshot["values"]
                 matches = (

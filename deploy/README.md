@@ -18,8 +18,11 @@ timestamped releases). Order of operations, matching OPS-06:
    first run) -- an isolated environment separate from the system Python.
 4. Validate `config/production.yaml` on the target (`validate_config.py`)
    and abort before touching data or services if it is invalid.
-5. Take a minimal local SQLite backup (`backup_db.py`, sqlite3's online
-   `.backup()` API) before migrating. This is a partial OPS-10 only: no
+5. If the target schema is behind the latest migration, take a minimal
+   local SQLite backup (`backup_db.py`, sqlite3's online `.backup()` API)
+   before migrating. Code-only deploys with a current schema skip the backup,
+   avoiding a redundant full-size copy of large databases. This is partial
+   OPS-10 only: no
    retention policy, no off-device copy, no restore drill yet.
 6. Apply schema migrations (`migrate.py`) and sync the device catalog
    (`sync_devices.py`).
@@ -75,6 +78,19 @@ attempt, a 5-second telemetry confirmation window, offline-at-submit
 rejection, and per-device queue limit 3. Ambiguous outcomes are never
 automatically resent; interrupted attempts become `uncertain` and block
 further commands on that device pending admin reconciliation.
+
+`control.plc_refill_enabled` remains false. Enabling it exposes only the
+firmware v4.1 `refill` request, never direct pump outputs. A refill request
+can run the well pump until the PLC reads its 1000 L stop threshold or a
+firmware stop condition occurs; it is non-idempotent and is never retried
+automatically. Enable this gate only after a separate safety review and
+explicit approval for real refill actuation.
+
+PLC v4.1 telemetry and its gated refill capability were deployed on
+2026-10-21; catalog sync removes the obsolete v4.0 `set_output` capability.
+The refill gate remains off. When the schema is current, `backup_db.py`
+skips a redundant full-size copy; it still backs up before any pending
+migration.
 
 After migration 0003 is deployed, issue client credentials on the Pi:
 

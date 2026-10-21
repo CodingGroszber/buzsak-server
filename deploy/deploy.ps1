@@ -136,7 +136,7 @@ try {
     Invoke-Remote "echo '$deployedVersion' > $RemotePath/deployed_version.txt"
 
     if (-not $ApplyServices) {
-        Write-Host "Code, dependencies, config validation, backup, migrations and device sync are up to date." -ForegroundColor Yellow
+        Write-Host "Code, dependencies, config validation, pending migrations and device sync are up to date." -ForegroundColor Yellow
         Write-Host "Services were left untouched. Re-run with -ApplyServices to install units and restart them." -ForegroundColor Yellow
         return
     }

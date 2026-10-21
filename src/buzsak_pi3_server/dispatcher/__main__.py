@@ -1,10 +1,4 @@
-"""Dispatcher process entry point (ARC-02, ARC-06).
-
-Command claiming, transmission, and lifecycle reconciliation for the
-general command system (Section 9) are still not implemented -- only the
-narrow, verified Sonoff MiniD "pulse" exception (DEV-10, dispatcher/pulse.py)
-runs here, once each device's action contract has been verified (DEV-04).
-"""
+"""Dispatcher process entry point for durable and scoped device commands (ARC-02, ARC-06)."""
 
 from __future__ import annotations
 
@@ -41,11 +35,7 @@ def main() -> None:
         len(enabled_devices),
     )
     if not enabled_devices:
-        logger.warning(
-            "no enabled devices configured; dispatcher is idling (only the "
-            "DEV-10 pulse exception is implemented; general command "
-            "execution is still not implemented)"
-        )
+        logger.warning("no enabled devices configured; dispatcher is idling")
 
     signal.signal(signal.SIGTERM, _handle_shutdown_signal)
     signal.signal(signal.SIGINT, _handle_shutdown_signal)

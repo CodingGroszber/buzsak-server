@@ -76,15 +76,39 @@ def test_sync_registers_catalog_parameters_and_capabilities(connection):
     }
     assert parameter_ids == {
         "well_pump", "tank_pump", "right_sw", "left_sw",
-        "switch_led", "wifi_led", "pressure_bar", "water_level_liters",
+        "switch_led", "wifi_led", "well_pump_controllable",
+        "tank_pump_controllable", "switch_led_controllable",
+        "wifi_led_controllable", "firmware", "ip", "switch_mode",
+        "switch_mode_code", "refill_button", "refill_active",
+        "pressure_bar", "pressure_signal", "pressure_mv",
+        "water_level_liters", "water_level_signal", "water_level_mv",
+        "water_level_low",
     }
 
     action_id, params_schema = connection.execute(
         "SELECT action_id, params_schema FROM capabilities WHERE device_id = 'garden-plc'"
     ).fetchone()
-    assert action_id == "set_output"
-    assert json.loads(params_schema) == {
-        "name": ["well_pump", "tank_pump"], "state": "bool"}
+    assert action_id == "refill"
+    assert json.loads(params_schema) == {}
+
+
+def test_sync_removes_obsolete_plc_output_capability(connection):
+    app_config = _app_config((
+        DeviceConfig(id="garden-plc", kind="garden-plc",
+                     address="http://192.168.1.94/", enabled=True),
+    ))
+    sync_devices(connection, app_config)
+    connection.execute(
+        "INSERT INTO capabilities (device_id, action_id, params_schema) "
+        "VALUES ('garden-plc', 'set_output', '{}')"
+    )
+
+    sync_devices(connection, app_config)
+
+    capabilities = connection.execute(
+        "SELECT action_id FROM capabilities WHERE device_id = 'garden-plc' ORDER BY action_id"
+    ).fetchall()
+    assert capabilities == [("refill",)]
 
 
 def test_sync_registers_expanded_valve_telemetry_without_schema_changes(connection):
@@ -138,7 +162,7 @@ def test_sync_is_idempotent_and_updates_changed_fields(connection):
         "SELECT enabled FROM devices WHERE id = 'garden-plc'"
     ).fetchone()[0]
     assert device_count == 1
-    assert parameter_count == 8
+    assert parameter_count == 23
     assert enabled == 1
 
 

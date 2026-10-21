@@ -12,6 +12,8 @@ def test_load_config_parses_example_file(example_config_path):
     assert config.database.synchronous == "FULL"
     assert config.polling.default_interval_seconds == 1.0
     assert config.control.valve_enabled is False
+    assert config.control.plc_refill_enabled is False
+    assert config.control.plc_refill_enabled is False
     assert config.control.command_lifetime_seconds == 12
     assert config.control.confirmation_timeout_seconds == 5.0
     assert config.control.max_attempts == 1

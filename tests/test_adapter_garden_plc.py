@@ -32,6 +32,17 @@ def test_parse_state_ok():
     assert water_level.liters == pytest.approx(750)
 
 
+def test_parse_state_v41_refill_payload():
+    state = parse_state(_load("state_v41_refill.json"))
+
+    assert state.firmware == "v4.1"
+    assert state.switch_mode == 1
+    assert state.refill_button is False
+    assert state.refill_active is False
+    assert state.inputs == ()
+    assert state.output("well_pump").controllable is False
+
+
 def test_pressure_invalid_omits_bar():
     state = parse_state(_load("state_pressure_invalid.json"))
 

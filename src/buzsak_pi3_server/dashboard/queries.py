@@ -123,9 +123,11 @@ def _fetch_capabilities(
             params_schema = params_schema_raw
         valve_action = kind == _VALVE_KIND and action_id in {
             "set_output", "set_mode"}
+        plc_refill = kind == _PLC_KIND and action_id == "refill"
         enabled = (
             (kind, action_id) in _ENABLED_CAPABILITIES
             or (valve_action and app_config.control.valve_enabled)
+            or (plc_refill and app_config.control.plc_refill_enabled)
         )
         capability = {
             "action_id": action_id,
@@ -135,10 +137,28 @@ def _fetch_capabilities(
                 None if enabled else (
                     "Valve control is disabled by deployment configuration; "
                     "trusted HTTPS and operator authentication are required."
-                    if valve_action else _CONTROL_DISABLED_REASON
+                    if valve_action else (
+                        "PLC refill is disabled by deployment configuration; "
+                        "a fresh AUTO-mode and valid water-level signal are required."
+                        if plc_refill else _CONTROL_DISABLED_REASON
+                    )
                 )
             ),
         }
+        if plc_refill:
+            capability["retry_safe"] = False
+            capability["lifetime_s"] = app_config.control.command_lifetime_seconds
+            capability["effect"] = "refill_until_level_threshold"
+            capability["requires"] = {
+                "switch_mode": "automatic",
+                "refill_active": False,
+                "refill_button": False,
+                "water_level_signal": True,
+                "fresh": True,
+            }
+            capability["confirmation"] = (
+                "fresh refill_active=true or refill_button=true"
+            )
         if valve_action:
             capability["retry_safe"] = True
             capability["lifetime_s"] = app_config.control.command_lifetime_seconds

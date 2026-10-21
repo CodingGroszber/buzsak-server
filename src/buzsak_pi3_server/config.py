@@ -46,6 +46,7 @@ class PollingConfig:
 @dataclasses.dataclass(frozen=True)
 class ControlConfig:
     valve_enabled: bool = False
+    plc_refill_enabled: bool = False
     command_lifetime_seconds: int = 12
     confirmation_timeout_seconds: float = 5.0
     max_attempts: int = 1
@@ -137,6 +138,9 @@ def _parse_control(data: Any) -> ControlConfig:
     valve_enabled = data.get("valve_enabled", False)
     if not isinstance(valve_enabled, bool):
         raise ConfigError("control.valve_enabled must be a boolean")
+    plc_refill_enabled = data.get("plc_refill_enabled", False)
+    if not isinstance(plc_refill_enabled, bool):
+        raise ConfigError("control.plc_refill_enabled must be a boolean")
     command_lifetime_seconds = int(data.get("command_lifetime_seconds", 12))
     if not 0 < command_lifetime_seconds <= 60:
         raise ConfigError(
@@ -156,6 +160,7 @@ def _parse_control(data: Any) -> ControlConfig:
             "control.per_device_queue_depth must be between 1 and 3")
     return ControlConfig(
         valve_enabled=valve_enabled,
+        plc_refill_enabled=plc_refill_enabled,
         command_lifetime_seconds=command_lifetime_seconds,
         confirmation_timeout_seconds=confirmation_timeout_seconds,
         max_attempts=max_attempts,
