@@ -120,6 +120,11 @@ CATALOG: dict[str, DeviceCatalog] = {
                 "set_mode",
                 {"value": ["manual", "automatic"]},
             ),
+            CapabilityEntry(
+                "set_rain_schedule",
+                {"start": "HH:MM", "duration_minutes": {
+                    "type": "int", "minimum": 1, "maximum": 60}},
+            ),
         ),
     ),
     # DEV-10: one narrow, verified capability -- a fixed 0.5s OnOff pulse

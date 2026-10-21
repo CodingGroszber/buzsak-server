@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -52,6 +53,7 @@ class _SequenceClock:
 
 class _ValveHandler(BaseHTTPRequestHandler):
     status_code = 200
+    body = b"{}"
     requests = []
 
     def log_message(self, format, *args):
@@ -61,12 +63,13 @@ class _ValveHandler(BaseHTTPRequestHandler):
         type(self).requests.append((self.path, self.command))
         self.send_response(type(self).status_code)
         self.end_headers()
-        self.wfile.write(b"{}")
+        self.wfile.write(type(self).body)
 
 
 @pytest.fixture
 def valve_server():
     _ValveHandler.status_code = 200
+    _ValveHandler.body = b"{}"
     _ValveHandler.requests = []
     server = HTTPServer(("127.0.0.1", 0), _ValveHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -109,6 +112,10 @@ def _setup(tmp_path, address):
         "relay4_light": ("false", "bool"),
         "relay4_controllable": ("true", "bool"),
         "relay4_always_manual": ("true", "bool"),
+        "rain_valve_on": ("false", "bool"),
+        "rain_start_hour": ("5", "int"),
+        "rain_start_minute": ("0", "int"),
+        "rain_duration_s": ("600", "int"),
     }
     for parameter_id, (value, value_type) in values.items():
         connection.execute(
@@ -140,6 +147,108 @@ def _enqueue(config, key="cmd-1", *, action="set_output", params=None):
 
 def _connection_factory(config):
     return lambda: db.connect(config.database)
+
+
+def _rain_setup(tmp_path, valve_server):
+    config = _setup(tmp_path, f"http://127.0.0.1:{valve_server.server_port}/")
+    config = replace(config, control=replace(config.control, valve_rain_schedule_enabled=True))
+    accepted = _enqueue(config, action="set_rain_schedule",
+                        params={"start": "23:50", "duration_minutes": 30})
+    return config, accepted
+
+
+def test_rain_schedule_posts_minutes_and_confirms_seconds(tmp_path, valve_server):
+    config, accepted = _rain_setup(tmp_path, valve_server)
+    _ValveHandler.body = b'{"ok":true}'
+    execute_one_pending(config, clock=_FixedClock())
+    assert _ValveHandler.requests == [("/api/rain?start=23%3A50&duration=30", "POST")]
+    assert _state(config, accepted.command_id)[0] == "acknowledged"
+    connection = db.connect(config.database)
+    try:
+        assert reconcile_acknowledged(connection, config, clock=_FixedClock()) == 0
+    finally:
+        connection.close()
+    observed_at = (_NOW + timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _update_observations(config, {
+        "rain_start_hour": "23", "rain_start_minute": "50", "rain_duration_s": "30",
+    }, observed_at)
+    connection = db.connect(config.database)
+    try:
+        assert reconcile_acknowledged(connection, config,
+                                      clock=_FixedClock(_NOW + timedelta(seconds=1))) == 0
+    finally:
+        connection.close()
+    _update_observations(config, {"rain_duration_s": "1800"}, observed_at)
+    connection = db.connect(config.database)
+    try:
+        assert reconcile_acknowledged(connection, config,
+                                      clock=_FixedClock(_NOW + timedelta(seconds=1))) == 1
+    finally:
+        connection.close()
+    assert _state(config, accepted.command_id)[0] == "confirmed"
+    assert len(_ValveHandler.requests) == 1
+
+
+@pytest.mark.parametrize("body,state", [
+    (b'{"ok":false}', "failed"), (b'{}', "uncertain"),
+    (b'{"ok":1}', "uncertain"), (b'not json', "uncertain"),
+    (b'x' * 4097, "uncertain"),
+])
+def test_rain_schedule_interprets_application_acknowledgment(tmp_path, valve_server, body, state):
+    config, accepted = _rain_setup(tmp_path, valve_server)
+    _ValveHandler.body = body
+    execute_one_pending(config, clock=_FixedClock())
+    assert _state(config, accepted.command_id)[0] == state
+    execute_one_pending(config, clock=_FixedClock())
+    assert len(_ValveHandler.requests) == 1
+
+
+@pytest.mark.parametrize("change", ["gate", "mode", "revision"])
+def test_rain_schedule_rechecks_gate_and_state_before_send(tmp_path, valve_server, change):
+    config, accepted = _rain_setup(tmp_path, valve_server)
+    if change == "gate":
+        config = replace(config, control=replace(config.control, valve_rain_schedule_enabled=False))
+    else:
+        connection = db.connect(config.database)
+        try:
+            if change == "mode":
+                connection.execute("UPDATE observations_latest SET value = 'automatic' WHERE parameter_id = 'mode'")
+            else:
+                connection.execute("UPDATE observations_latest SET revision = 2 WHERE parameter_id = 'rain_duration_s'")
+        finally:
+            connection.close()
+    execute_one_pending(config, clock=_FixedClock())
+    assert _ValveHandler.requests == []
+    assert _state(config, accepted.command_id)[0] == ("pending" if change == "gate" else "failed")
+
+
+@pytest.mark.parametrize("admin", [False, True])
+def test_rain_schedule_uncertain_reconciliation_uses_same_readback(tmp_path, valve_server, admin):
+    config, accepted = _rain_setup(tmp_path, valve_server)
+    _ValveHandler.body = b'{}'
+    execute_one_pending(config, clock=_FixedClock())
+    assert _state(config, accepted.command_id)[0] == "uncertain"
+    observed_at = (_NOW + timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _update_observations(config, {
+        "rain_start_hour": "23", "rain_start_minute": "50", "rain_duration_s": "1800",
+    }, observed_at)
+    connection = db.connect(config.database)
+    try:
+        if admin:
+            connection.execute(
+                "INSERT INTO command_reconciliation_requests "
+                "(request_id, command_id, actor_id, resolution, note, requested_at, status) "
+                "VALUES ('rain-reconcile', ?, 'admin', 'confirmed', 'verified schedule', ?, 'pending')",
+                (accepted.command_id, observed_at))
+            assert process_reconciliation_requests(connection, config,
+                clock=_FixedClock(_NOW + timedelta(seconds=1))) == 1
+        else:
+            assert reconcile_uncertain(connection, config,
+                clock=_FixedClock(_NOW + timedelta(seconds=1))) == 1
+    finally:
+        connection.close()
+    assert _state(config, accepted.command_id)[0] == "confirmed"
+    assert len(_ValveHandler.requests) == 1
 
 
 def _state(config, parameter_id):

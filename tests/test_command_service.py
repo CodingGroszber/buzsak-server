@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -68,6 +69,10 @@ def connection(tmp_path):
         "relay4_light": ("false", "bool"),
         "relay4_controllable": ("true", "bool"),
         "relay4_always_manual": ("true", "bool"),
+        "rain_valve_on": ("false", "bool"),
+        "rain_start_hour": ("5", "int"),
+        "rain_start_minute": ("0", "int"),
+        "rain_duration_s": ("600", "int"),
     }
     observed_at = _NOW.strftime("%Y-%m-%dT%H:%M:%SZ")
     for parameter_id, (value, value_type) in values.items():
@@ -213,3 +218,66 @@ def test_pending_queue_is_bounded(connection):
         _submit(connection, key="request-2", config=config)
 
     assert exc_info.value.code == "queue_full"
+
+
+def _rain_config():
+    config = _app_config()
+    return replace(config, control=replace(config.control, valve_rain_schedule_enabled=True))
+
+
+def _submit_rain(connection, **kwargs):
+    return _submit(connection, action="set_rain_schedule",
+                   params={"start": "23:50", "duration_minutes": 30}, **kwargs)
+
+
+def test_rain_schedule_requires_both_gates_and_deduplicates(connection):
+    for config in (_app_config(), replace(_rain_config(), control=ControlConfig(
+            valve_rain_schedule_enabled=True))):
+        with pytest.raises(CommandRejected) as exc_info:
+            _submit_rain(connection, config=config)
+        assert exc_info.value.code == "control_disabled"
+    first = _submit_rain(connection, config=_rain_config())
+    assert _submit_rain(connection, config=_rain_config()).command_id == first.command_id
+    stored = connection.execute(
+        "SELECT params_json, preconditions_json FROM commands WHERE command_id = ?",
+        (first.command_id,),
+    ).fetchone()
+    assert json.loads(stored[0]) == {"start": "23:50", "duration_minutes": 30}
+    assert set(json.loads(stored[1])["observed_revisions"]) == {
+        "mode", "rain_valve_on", "relay2_rain", "rain_start_hour", "rain_start_minute", "rain_duration_s"}
+
+
+@pytest.mark.parametrize("parameter,value", [
+    ("mode", "automatic"), ("rain_valve_on", "true"), ("relay2_rain", "true"),
+])
+def test_rain_schedule_requires_manual_and_idle(connection, parameter, value):
+    connection.execute("UPDATE observations_latest SET value = ? WHERE parameter_id = ?",
+                       (value, parameter))
+    with pytest.raises(CommandRejected) as exc_info:
+        _submit_rain(connection, config=_rain_config())
+    assert exc_info.value.code == "precondition_failed"
+
+
+def test_rain_schedule_requires_fresh_configuration_and_matching_revision(connection):
+    with pytest.raises(CommandRejected) as exc_info:
+        _submit_rain(connection, config=_rain_config(), expected_revisions={"rain_duration_s": 2})
+    assert exc_info.value.code == "stale_revision"
+    connection.execute("UPDATE observations_latest SET quality = 'unavailable' "
+                       "WHERE parameter_id = 'rain_duration_s'")
+    with pytest.raises(CommandRejected) as exc_info:
+        _submit_rain(connection, config=_rain_config())
+    assert exc_info.value.code == "stale_telemetry"
+
+
+@pytest.mark.parametrize("schedule_first", [True, False])
+def test_rain_schedule_conflicts_with_other_pending_work(connection, schedule_first):
+    if schedule_first:
+        _submit_rain(connection, config=_rain_config())
+    else:
+        _submit(connection)
+    with pytest.raises(CommandRejected) as exc_info:
+        if schedule_first:
+            _submit(connection, key="other")
+        else:
+            _submit_rain(connection, key="other", config=_rain_config())
+    assert exc_info.value.code == "conflict"

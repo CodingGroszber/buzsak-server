@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
+from buzsak_pi3_server.adapters.valve_controller import rain_schedule_query
 from buzsak_pi3_server import db
 from buzsak_pi3_server.commands.service import (
     CommandRejected,
@@ -98,9 +99,12 @@ def claim_one_pending(
             "WHERE c.state = 'pending' AND NOT EXISTS ("
             "SELECT 1 FROM commands active WHERE active.device_id = c.device_id "
             "AND active.state IN ('dispatching', 'sent', 'acknowledged', 'uncertain')) "
-            "AND ((d.kind = 'valve_controller' AND ? = 1) OR "
+            "AND ((d.kind = 'valve_controller' AND ? = 1 AND ("
+            "c.action_id IN ('set_output', 'set_mode') OR "
+            "(c.action_id = 'set_rain_schedule' AND ? = 1))) OR "
             "(d.kind = 'garden_plc' AND c.action_id = 'refill' AND ? = 1)) "
             "ORDER BY c.acceptance_sequence LIMIT 1", (int(app_config.control.valve_enabled),
+                                                       int(app_config.control.valve_rain_schedule_enabled),
                                                        int(app_config.control.plc_refill_enabled))
         ).fetchone()
         if row is None:
@@ -180,6 +184,9 @@ def _parse_iso(value: str) -> datetime:
 
 
 def _device_url(address: str, action_id: str, params: dict) -> str:
+    if action_id == "set_rain_schedule":
+        query = urllib.parse.urlencode(rain_schedule_query(params))
+        return urllib.parse.urljoin(address, "api/rain") + "?" + query
     if action_id == "refill":
         return urllib.parse.urljoin(address, "api/control")
     if action_id == "set_output":
@@ -209,6 +216,16 @@ def _send(claim: ClaimedCommand, timeout_seconds: float) -> tuple[int | None, st
     opener = urllib.request.build_opener(_NoRedirect())
     try:
         with opener.open(request, timeout=timeout_seconds) as response:
+            if claim.action_id == "set_rain_schedule" and response.status == 200:
+                body = response.read(4097)
+                try:
+                    payload = json.loads(body) if len(body) <= 4096 else None
+                except (ValueError, UnicodeError):
+                    payload = None
+                if not isinstance(payload, dict) or type(payload.get("ok")) is not bool:
+                    return response.status, "invalid_acknowledgment"
+                if payload["ok"] is False:
+                    return response.status, "device_rejected"
             return response.status, None
     except urllib.error.HTTPError as exc:
         return exc.code, str(exc.reason)
@@ -290,7 +307,11 @@ def execute_one_pending(
         try:
             status, error = _send(
                 claim, app_config.polling.request_timeout_seconds)
-            if status == 200:
+            if status == 200 and error == "device_rejected":
+                state, reason = "failed", "device_rejected"
+            elif status == 200 and error is not None:
+                state, reason = "uncertain", "ambiguous_device_response"
+            elif status == 200:
                 state, reason = "acknowledged", None
             elif status == 409:
                 state, reason = "failed", "device_interlock"
@@ -389,6 +410,15 @@ def _confirmation_snapshot(
     return {"observed_at": max(row[3] for row in rows), "values": values}
 
 
+_RAIN_SCHEDULE_PARAMETERS = ("rain_start_hour", "rain_start_minute", "rain_duration_s")
+
+
+def _rain_schedule_matches(values: dict, params: dict) -> bool:
+    hour, minute = params["start"].split(":")
+    expected = (str(int(hour)), str(int(minute)), str(params["duration_minutes"] * 60))
+    return all(values[key] == value for key, value in zip(_RAIN_SCHEDULE_PARAMETERS, expected))
+
+
 def reconcile_acknowledged(
     connection: sqlite3.Connection,
     app_config: AppConfig,
@@ -411,7 +441,9 @@ def reconcile_acknowledged(
         interval = device_config.poll_interval_seconds or app_config.polling.default_interval_seconds
         stale_after = interval * app_config.polling.stale_multiplier
         params = json.loads(params_json)
-        if action_id == "refill":
+        if action_id == "set_rain_schedule":
+            parameter_ids = _RAIN_SCHEDULE_PARAMETERS
+        elif action_id == "refill":
             parameter_ids = ("refill_button", "refill_active")
         elif action_id == "set_mode":
             parameter_ids = ("mode", "relay1_mist",
@@ -425,7 +457,9 @@ def reconcile_acknowledged(
         confirmed = False
         if snapshot is not None:
             values = snapshot["values"]
-            if action_id == "refill":
+            if action_id == "set_rain_schedule":
+                confirmed = _rain_schedule_matches(values, params)
+            elif action_id == "refill":
                 confirmed = (
                     values["refill_button"] == "true"
                     or values["refill_active"] == "true"
@@ -498,7 +532,9 @@ def reconcile_uncertain(
         interval = device_config.poll_interval_seconds or app_config.polling.default_interval_seconds
         stale_after = interval * app_config.polling.stale_multiplier
         params = json.loads(params_json)
-        if action_id == "refill":
+        if action_id == "set_rain_schedule":
+            parameter_ids = _RAIN_SCHEDULE_PARAMETERS
+        elif action_id == "refill":
             parameter_ids = ("refill_button", "refill_active")
         elif action_id == "set_mode":
             parameter_ids = ("mode", "relay1_mist",
@@ -512,7 +548,9 @@ def reconcile_uncertain(
         if snapshot is None:
             continue
         values = snapshot["values"]
-        if action_id == "refill":
+        if action_id == "set_rain_schedule":
+            confirmed = _rain_schedule_matches(values, params)
+        elif action_id == "refill":
             confirmed = (
                 values["refill_button"] == "true"
                 or values["refill_active"] == "true"
@@ -584,7 +622,9 @@ def process_reconciliation_requests(
             result_reason = "command is no longer uncertain"
         elif resolution == "confirmed":
             params = json.loads(params_json)
-            if action_id == "refill":
+            if action_id == "set_rain_schedule":
+                parameter_ids = _RAIN_SCHEDULE_PARAMETERS
+            elif action_id == "refill":
                 parameter_ids = ("refill_button", "refill_active")
             elif action_id == "set_mode":
                 parameter_ids = (
@@ -605,6 +645,9 @@ def process_reconciliation_requests(
             )
             if snapshot is None:
                 result_reason = "fresh post-attempt telemetry is unavailable"
+            elif action_id == "set_rain_schedule":
+                if not _rain_schedule_matches(snapshot["values"], params):
+                    result_reason = "fresh telemetry does not satisfy the set_rain_schedule confirmation rule"
             elif action_id == "refill":
                 values = snapshot["values"]
                 matches = (

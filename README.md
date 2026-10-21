@@ -23,7 +23,8 @@ commissioned Sonoff telemetry devices. For PLC firmware v4.1, the server
 reads `switch_mode`, refill state, output controllability, and analog signal
 quality; the removed v4.0 selector input fields remain unavailable rather
 than blocking all telemetry. The durable command lifecycle supports valve
-`set_output`/`set_mode`, a separately gated PLC `refill` request, and the
+`set_output`/`set_mode`, a separately gated valve `set_rain_schedule`, a
+separately gated PLC `refill` request, and the
 narrow Sonoff pulse exception. The browser dashboard remains read-only.
 See [backlog.md](backlog.md) for remaining operational gates.
 
@@ -145,6 +146,14 @@ the LAN address alone does not grant access. For the current Pi deployment:
   remains read-only.
   `confirmed` reports observed relay/mode state, not water flow or physical
   valve movement. A mode change closes all relays.
+- Rain schedule editing additionally requires
+  `control.valve_rain_schedule_enabled: true` (default false), fresh manual
+  mode and an idle rain relay. Clients send `set_rain_schedule` with
+  `{"start":"05:30","duration_minutes":10}` through the same command API.
+  Time is Europe/Budapest local time; duration is 1..60 whole minutes.
+  Readback confirms runtime configuration, not NVS persistence or flow.
+  Returning to automatic mode or rebooting may start watering in the chosen
+  window. See [the client interface](docs/dashboard.md#valve-set_rain_schedule).
 - For remote use, install the official Tailscale app and join the owner's
   private tailnet. The Pi now advertises only `192.168.1.95/32`; once the
   tailnet admin approves that route and confirms policy allows TCP 443 only,

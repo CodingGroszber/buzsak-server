@@ -14,6 +14,7 @@ def test_load_config_parses_example_file(example_config_path):
     assert config.control.valve_enabled is False
     assert config.control.plc_refill_enabled is False
     assert config.control.plc_refill_enabled is False
+    assert config.control.valve_rain_schedule_enabled is False
     assert config.control.command_lifetime_seconds == 12
     assert config.control.confirmation_timeout_seconds == 5.0
     assert config.control.max_attempts == 1
@@ -83,6 +84,20 @@ def test_control_queue_depth_cannot_exceed_approved_bound(tmp_path):
 def test_missing_file_raises(tmp_path):
     with pytest.raises(ConfigError, match="cannot read"):
         load_config(tmp_path / "does_not_exist.yaml")
+
+
+    @pytest.mark.parametrize("value", ["true", "false", "'true'", "1", "null"])
+    def test_rain_schedule_gate_requires_boolean(tmp_path, value):
+      config_path = tmp_path / "config.yaml"
+      config_path.write_text(
+        f"database:\n  path: '/tmp/db.sqlite3'\ncontrol:\n  valve_rain_schedule_enabled: {value}\n",
+        encoding="utf-8",
+      )
+      if value in {"true", "false"}:
+        assert load_config(config_path).control.valve_rain_schedule_enabled is (value == "true")
+      else:
+        with pytest.raises(ConfigError, match="valve_rain_schedule_enabled"):
+          load_config(config_path)
 
 
 def test_device_label_is_optional_and_defaults_to_none(tmp_path):

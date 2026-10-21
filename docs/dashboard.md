@@ -103,7 +103,7 @@ per-device worker thread has stopped; it does not mutate the stored
 The browser dashboard remains read-only (UI-06). An authenticated native
 client may submit `POST /api/v1/devices/{device_id}/commands` over trusted
 HTTPS with an operator bearer token. The API supports valve-controller
-`set_output`/`set_mode`, gated PLC `refill`, and the existing scoped Sonoff
+`set_output`/`set_mode`, separately gated `set_rain_schedule`, gated PLC `refill`, and the existing scoped Sonoff
 `pulse` endpoint. Durable commands validate fresh health and relevant
 observations, enforce idempotency and bounded deadlines, and return `202`
 with a command ID/status URL. Use `GET /api/v1/commands/{id}` for status and
@@ -128,3 +128,48 @@ fresh post-attempt telemetry must show `refill_button` or `refill_active`.
 The action is never automatically retried, and its separate gate
 `control.plc_refill_enabled` defaults to false. The browser dashboard does
 not expose this control.
+
+### Valve `set_rain_schedule`
+
+Discover the action and its `enabled`, `params_schema`, `requires`,
+`timezone`, `units`, `side_effects` and `confirmation` fields through
+`GET /api/dashboard/state`. `enabled` reflects deployment gates, not
+current authorization or freshness. Both `control.valve_enabled` and
+`control.valve_rain_schedule_enabled` must be true; the new gate defaults
+false and requires explicit rollout approval. Sync the device catalog
+with the updated code during approved deployment.
+
+An operator can submit this body to
+`POST /api/v1/devices/valve-controller/commands`, with the existing trusted
+HTTPS and Bearer-token contract (browser sessions require CSRF protection):
+
+```json
+{
+  "action_id": "set_rain_schedule",
+  "params": {"start": "05:30", "duration_minutes": 10},
+  "idempotency_key": "unique-per-operator-request",
+  "client_origin": "android-app"
+}
+```
+
+Start is exact `HH:MM` in **Europe/Budapest**, not the client's timezone
+or UTC. Duration is a whole number from 1 through 60 minutes. Optional
+`expected_revisions` can contain relevant `mode`, `rain_valve_on`,
+`relay2_rain`, `rain_start_hour`, `rain_start_minute`, and `rain_duration_s`
+revisions read from state; omitted revisions are still captured and rechecked
+before dispatch. Manual mode, an idle rain relay, healthy fresh telemetry
+and an idle controller command queue are required. The API does not change
+mode automatically or contact the controller during submission.
+
+`202` means durably pending. Read the returned `status_url`; only matching
+post-attempt hour/minute/duration-in-seconds telemetry confirms runtime
+configuration. This does **not** prove NVS persistence, watering, or flow.
+One attempt is allowed; ambiguous outcomes remain uncertain and block
+conflicting commands pending reconciliation. Do not submit a new key merely
+because the first request timed out; retry submission with the same key
+to recover its existing command/status.
+
+Applying a schedule updates controller configuration immediately; returning
+to automatic mode or rebooting may start watering inside the chosen window.
+No Pi-side scheduling or dashboard editing controls are added. See the
+[valve firmware contract](adapters/valve_controller.md) for limitations.

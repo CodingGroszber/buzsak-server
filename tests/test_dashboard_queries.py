@@ -20,6 +20,7 @@ from buzsak_pi3_server.config import (
     ServerConfig,
 )
 from buzsak_pi3_server.dashboard.queries import build_dashboard_state
+from buzsak_pi3_server.device_registration import sync_devices
 
 
 class _FixedClock:
@@ -78,6 +79,25 @@ def test_devices_group_into_the_three_fixed_parties(connection):
     assert matter_party["configured"] is False
     assert matter_party["devices"] == []
     assert "note" in matter_party
+
+
+@pytest.mark.parametrize("valve,rain,enabled", [(False, False, False),
+    (True, False, False), (False, True, False), (True, True, True)])
+def test_rain_schedule_capability_declares_safe_client_contract(connection, valve, rain, enabled):
+    config = _app_config(devices=(DeviceConfig(id="valve-controller", kind="valve-controller",
+        address="http://127.0.0.1:1/", enabled=True),), control=ControlConfig(
+            valve_enabled=valve, valve_rain_schedule_enabled=rain))
+    sync_devices(connection, config)
+    device = build_dashboard_state(connection, config)["parties"][1]["devices"][0]
+    capability = next(item for item in device["capabilities"] if item["action_id"] == "set_rain_schedule")
+    assert capability["enabled"] is enabled
+    assert capability["params_schema"]["duration_minutes"]["maximum"] == 60
+    assert capability["timezone"] == "Europe/Budapest"
+    assert capability["units"] == {"duration_minutes": "min"}
+    assert capability["requires"]["mode"] == "manual"
+    assert capability["max_attempts"] == 1
+    assert capability["retry_safe"] is False
+    assert "not NVS durability" in capability["confirmation"]
 
 
 def test_parameter_without_observation_reports_no_data(connection):

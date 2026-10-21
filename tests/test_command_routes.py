@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from buzsak_pi3_server import db, schema
 from buzsak_pi3_server.api import create_app
 from buzsak_pi3_server.config import (
@@ -18,7 +20,7 @@ from buzsak_pi3_server.security.credentials import issue_credential
 _NOW = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _client(tmp_path, *, valve_enabled=True):
+def _client(tmp_path, *, valve_enabled=True, rain_enabled=False):
     config = AppConfig(
         database=DatabaseConfig(path=str(tmp_path / "commands.sqlite3")),
         server=ServerConfig(),
@@ -26,7 +28,7 @@ def _client(tmp_path, *, valve_enabled=True):
         devices=(DeviceConfig(
             id="valve-controller", kind="valve-controller",
             address="http://127.0.0.1:1/", enabled=True),),
-        control=ControlConfig(valve_enabled=valve_enabled),
+        control=ControlConfig(valve_enabled=valve_enabled, valve_rain_schedule_enabled=rain_enabled),
     )
     connection = db.connect(config.database)
     schema.apply_migrations(connection)
@@ -43,6 +45,10 @@ def _client(tmp_path, *, valve_enabled=True):
         "relay2_rain": ("false", "bool"),
         "relay3_drip": ("false", "bool"),
         "relay4_light": ("false", "bool"),
+        "rain_valve_on": ("false", "bool"),
+        "rain_start_hour": ("5", "int"),
+        "rain_start_minute": ("0", "int"),
+        "rain_duration_s": ("600", "int"),
     }
     for index in range(1, 5):
         values.setdefault(f"relay{index}_controllable", ("true", "bool"))
@@ -72,6 +78,56 @@ def _command_body(key="request-1"):
 
 def _headers(token):
     return {"Authorization": f"Bearer {token}"}
+
+
+def _rain_body():
+    return {"action_id": "set_rain_schedule",
+            "params": {"start": "05:30", "duration_minutes": 10},
+            "idempotency_key": "rain-1", "client_origin": "android-app",
+            "expected_revisions": {"rain_duration_s": 1}}
+
+
+def test_rain_schedule_api_accepts_reads_deduplicates_and_cancels_without_device_io(tmp_path):
+    client, tokens = _client(tmp_path, rain_enabled=True)
+    headers = _headers(tokens["operator"])
+    first = client.post("/api/v1/devices/valve-controller/commands", json=_rain_body(),
+                        headers=headers, base_url="https://localhost")
+    assert first.status_code == 202
+    duplicate = client.post("/api/v1/devices/valve-controller/commands", json=_rain_body(),
+                            headers=headers, base_url="https://localhost")
+    assert duplicate.get_json()["command_id"] == first.get_json()["command_id"]
+    status_url = first.get_json()["status_url"]
+    status = client.get(status_url, headers=headers, base_url="https://localhost")
+    assert status.get_json()["params"] == _rain_body()["params"]
+    assert status.get_json()["status"] == "pending"
+    assert client.delete(status_url, headers=headers, base_url="https://localhost").get_json()["status"] == "cancelled"
+
+
+@pytest.mark.parametrize("role,secure,gate,status", [
+    (None, True, True, 401), ("viewer", True, True, 403),
+    ("operator", False, True, 426), ("operator", True, False, 403),
+])
+def test_rain_schedule_api_requires_operator_https_and_separate_gate(tmp_path, role, secure, gate, status):
+    client, tokens = _client(tmp_path, rain_enabled=gate)
+    response = client.post("/api/v1/devices/valve-controller/commands", json=_rain_body(),
+        headers=_headers(tokens[role]) if role else {},
+        base_url="https://localhost" if secure else "http://localhost")
+    assert response.status_code == status
+
+
+@pytest.mark.parametrize("params", [
+    {"start": "24:00", "duration_minutes": 10},
+    {"start": "05:30", "duration_minutes": True},
+    {"start": "05:30", "duration_minutes": 61},
+    {"start": "05:30", "duration_s": 600},
+])
+def test_rain_schedule_api_rejects_invalid_schema(tmp_path, params):
+    client, tokens = _client(tmp_path, rain_enabled=True)
+    body = {**_rain_body(), "params": params}
+    response = client.post("/api/v1/devices/valve-controller/commands", json=body,
+        headers=_headers(tokens["operator"]), base_url="https://localhost")
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "invalid_request"
 
 
 def test_operator_can_submit_and_read_own_command(tmp_path):

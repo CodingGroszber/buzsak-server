@@ -92,6 +92,21 @@ The refill gate remains off. When the schema is current, `backup_db.py`
 skips a redundant full-size copy; it still backs up before any pending
 migration.
 
+The valve rain-schedule interface was deployed on 2026-10-21 as
+`0.1.0+2026-10-21T11:21:15Z`. The independent
+`control.valve_rain_schedule_enabled` gate remains false; this rollout does
+not authorize enabling it or changing any device schedule. The three app
+services were stopped during the in-place code update and restarted after
+configuration validation and catalog synchronization. Schema v3 was already
+current, so no migration or new full-size backup was needed.
+
+Verification: 230 local tests passed; trusted HTTPS `/readyz` returned 200;
+authenticated state exposed `set_rain_schedule` with `enabled=false` and
+Europe/Budapest metadata. All four devices reported fresh healthy telemetry,
+and all three services were running with zero restart counters at the
+post-deployment check. No live command was submitted. The filesystem remains
+94% full (929 MB available); capacity/retention work remains outstanding.
+
 After migration 0003 is deployed, issue client credentials on the Pi:
 
 ```sh

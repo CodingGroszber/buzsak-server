@@ -124,10 +124,13 @@ def _fetch_capabilities(
         valve_action = kind == _VALVE_KIND and action_id in {
             "set_output", "set_mode"}
         plc_refill = kind == _PLC_KIND and action_id == "refill"
+        rain_schedule = kind == _VALVE_KIND and action_id == "set_rain_schedule"
         enabled = (
             (kind, action_id) in _ENABLED_CAPABILITIES
             or (valve_action and app_config.control.valve_enabled)
             or (plc_refill and app_config.control.plc_refill_enabled)
+            or (rain_schedule and app_config.control.valve_enabled
+                and app_config.control.valve_rain_schedule_enabled)
         )
         capability = {
             "action_id": action_id,
@@ -145,6 +148,29 @@ def _fetch_capabilities(
                 )
             ),
         }
+        if rain_schedule:
+            capability.update({
+                "disabled_reason": None if enabled else (
+                    "Rain schedule edits require both valve_enabled and "
+                    "valve_rain_schedule_enabled deployment gates."
+                ),
+                "target_resource": "rain_schedule",
+                "timezone": "Europe/Budapest",
+                "units": {"duration_minutes": "min"},
+                "retry_safe": False,
+                "max_attempts": 1,
+                "lifetime_s": app_config.control.command_lifetime_seconds,
+                "effect": "controller_daily_rain_schedule",
+                "requires": {"mode": "manual", "rain_valve_on": False,
+                             "relay2_rain": False, "fresh": True, "idle_command_queue": True},
+                "side_effects": ["updates_runtime_schedule", "attempts_nvs_persistence",
+                                 "may_water_on_return_to_automatic_or_reboot"],
+                "confirmation": (
+                    "fresh post-attempt rain_start_hour, rain_start_minute and "
+                    "rain_duration_s match requested start and duration_minutes * 60; "
+                    "runtime configuration only, not NVS durability or physical flow"
+                ),
+            })
         if plc_refill:
             capability["retry_safe"] = False
             capability["lifetime_s"] = app_config.control.command_lifetime_seconds

@@ -10,6 +10,7 @@ capability metadata live here — no HTTP client, retry/backoff, or dispatch
 from __future__ import annotations
 
 import dataclasses
+import re
 from typing import Any, Literal
 
 from buzsak_pi3_server.adapters.errors import AdapterParseError
@@ -24,6 +25,21 @@ ControlMode = Literal["manual", "automatic"]
 # all (docs/adapters/valve_controller.md) and are out of scope here.
 CONTROLLABLE_OUTPUTS: tuple[str, ...] = (
     "relay1", "relay2", "relay3", "relay4")
+
+
+def rain_schedule_query(params: Any) -> dict[str, str]:
+    """Validate the client schema and convert minutes to the firmware query."""
+    if not isinstance(params, dict) or set(params) != {"start", "duration_minutes"}:
+        raise AdapterParseError(
+            "set_rain_schedule requires start and duration_minutes")
+    start = params["start"]
+    duration = params["duration_minutes"]
+    if not isinstance(start, str) or re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", start) is None:
+        raise AdapterParseError("start must be HH:MM in controller local time")
+    if type(duration) is not int or not 1 <= duration <= 60:
+        raise AdapterParseError(
+            "duration_minutes must be an integer between 1 and 60")
+    return {"start": start, "duration": str(duration)}
 
 
 @dataclasses.dataclass(frozen=True)

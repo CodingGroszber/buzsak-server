@@ -6,9 +6,31 @@ from pathlib import Path
 import pytest
 
 from buzsak_pi3_server.adapters.errors import AdapterParseError
-from buzsak_pi3_server.adapters.valve_controller import parse_state
+from buzsak_pi3_server.adapters.valve_controller import parse_state, rain_schedule_query
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "valve_controller"
+
+
+@pytest.mark.parametrize("start,duration", [("00:00", 1), ("23:59", 60), ("05:30", 10)])
+def test_rain_schedule_query_uses_firmware_minutes(start, duration):
+    assert rain_schedule_query({"start": start, "duration_minutes": duration}) == {
+        "start": start, "duration": str(duration)}
+
+
+@pytest.mark.parametrize("params", [
+    {}, {"start": "05:00", "duration_minutes": 0},
+    {"start": "05:00", "duration_minutes": 61},
+    {"start": "05:00", "duration_minutes": True},
+    {"start": "05:00", "duration_minutes": 1.5},
+    {"start": "05:00", "duration_minutes": "10"},
+    {"start": "24:00", "duration_minutes": 10},
+    {"start": "5:00", "duration_minutes": 10},
+    {"start": "05:60", "duration_minutes": 10},
+    {"start": "05:00", "duration_minutes": 10, "state": True},
+])
+def test_rain_schedule_query_rejects_invalid_client_input(params):
+    with pytest.raises(AdapterParseError):
+        rain_schedule_query(params)
 
 
 def _load(name: str):

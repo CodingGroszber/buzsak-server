@@ -137,7 +137,7 @@ def test_sync_registers_expanded_valve_telemetry_without_schema_changes(connecti
             "SELECT action_id FROM capabilities WHERE device_id = 'valve-controller'"
         ).fetchall()
     }
-    assert capabilities == {"set_output", "set_mode"}
+    assert capabilities == {"set_output", "set_mode", "set_rain_schedule"}
 
 
 def test_sync_is_idempotent_and_updates_changed_fields(connection):

@@ -17,6 +17,7 @@ polling:
 control:
   valve_enabled: false # Opt-in per deployment after trusted HTTPS/auth are set up.
   plc_refill_enabled: false # Separate opt-in; a refill may run the well pump to its level threshold.
+  valve_rain_schedule_enabled: false
   command_lifetime_seconds: 12
   confirmation_timeout_seconds: 5.0
   max_attempts: 1

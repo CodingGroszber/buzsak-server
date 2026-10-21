@@ -10,7 +10,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from buzsak_pi3_server.adapters.errors import AdapterParseError
 from buzsak_pi3_server.adapters.registry import canonical_kind
+from buzsak_pi3_server.adapters.valve_controller import rain_schedule_query
 from buzsak_pi3_server.clock import Clock
 from buzsak_pi3_server.config import AppConfig
 from buzsak_pi3_server.security.credentials import Principal
@@ -19,6 +21,9 @@ _VALVE_KIND = "valve_controller"
 _PLC_KIND = "garden_plc"
 _PLC_REFILL_STOP_LITERS = 1000.0
 _ACTIVE_STATES = ("dispatching", "sent", "acknowledged", "uncertain")
+_RAIN_SCHEDULE_PARAMETERS = (
+    "rain_start_hour", "rain_start_minute", "rain_duration_s",
+)
 _OUTPUT_PARAMETERS = {
     "relay1": ("relay1_mist", "relay1_controllable", "relay1_always_manual"),
     "relay2": ("relay2_rain", "relay2_controllable", "relay2_always_manual"),
@@ -75,6 +80,12 @@ def _action_parameters(action_id: str, params: Any) -> tuple[str, ...]:
     if not isinstance(params, dict):
         raise CommandRejected(
             "invalid_request", "params must be an object", 400)
+    if action_id == "set_rain_schedule":
+        try:
+            rain_schedule_query(params)
+        except AdapterParseError as exc:
+            raise CommandRejected("invalid_request", str(exc), 400) from exc
+        return ("mode", "rain_valve_on", "relay2_rain", *_RAIN_SCHEDULE_PARAMETERS)
     if action_id == "refill":
         if params:
             raise CommandRejected(
@@ -185,7 +196,14 @@ def _validate_fresh_state(
         else "switch_mode_code"
     )
     mode = observed[mode_parameter][0]
-    if action_id == "set_output":
+    if action_id == "set_rain_schedule":
+        if mode != "manual":
+            raise CommandRejected(
+                "precondition_failed", "rain schedule edits require manual mode", 409)
+        if observed["rain_valve_on"][0] != "false" or observed["relay2_rain"][0] != "false":
+            raise CommandRejected(
+                "precondition_failed", "rain relay must be idle before schedule edits", 409)
+    elif action_id == "set_output":
         name = params["name"]
         _, controllable_id, always_manual_id = _OUTPUT_PARAMETERS[name]
         if observed[controllable_id][0] != "true":
@@ -232,6 +250,12 @@ def submit_command(
     if action_id in {"set_output", "set_mode"}:
         expected_kind = _VALVE_KIND
         enabled = app_config.control.valve_enabled
+    elif action_id == "set_rain_schedule":
+        expected_kind = _VALVE_KIND
+        enabled = (
+            app_config.control.valve_enabled
+            and app_config.control.valve_rain_schedule_enabled
+        )
     elif action_id == "refill":
         expected_kind = _PLC_KIND
         enabled = app_config.control.plc_refill_enabled
@@ -329,6 +353,14 @@ def submit_command(
         if active is not None:
             raise CommandRejected(
                 "conflict", f"device has unresolved command {active[0]}", 409)
+        pending_conflict = connection.execute(
+            "SELECT 1 FROM commands WHERE device_id = ? AND state = 'pending' "
+            "AND (action_id = 'set_rain_schedule' OR ? = 'set_rain_schedule') LIMIT 1",
+            (device_id, action_id),
+        ).fetchone()
+        if pending_conflict is not None:
+            raise CommandRejected(
+                "conflict", "rain schedule edit requires an idle command queue", 409)
         queued = connection.execute(
             "SELECT COUNT(*) FROM commands WHERE device_id = ? AND state = 'pending'",
             (device_id,),
